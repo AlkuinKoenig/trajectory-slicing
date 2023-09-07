@@ -1,0 +1,435 @@
+---
+title: "Trajectory slicing: Example 4 - clustering (part 1)"
+output:
+  html_document:
+    code_folding: hide
+    df_print: paged
+---
+
+In this example we use the cylindrical slices to cluster trajectories together. 
+
+##used libraries
+```{r, warning=FALSE, message=FALSE}
+library(tidyr)#for crunching
+library(magrittr)
+library(dplyr)#for crunching
+library(data.table)#for crunching (specifically rbindlist, which is fast). 
+library(circular)#for circular variables (the angle) and circular means
+library(tictoc)#for time keeping
+library(ggplot2)#for plotting
+library(rgdal)#for maps
+library(scales)#for plotting
+library(maps)#for the map
+
+library(trajectory.slicing)
+
+#In case you have problems with getting a compiled trajectory.slicing library and with getting it compiled yourself, you can also directly source the needed custom functions by uncommenting what is below. 
+#source(paste0(here::here(),"/../trajectory-slicing-Rpackage/package_code/R/fun_get_polar_coords_geographical.R"))
+#source(paste0(here::here(),"/../trajectory-slicing-Rpackage/package_code/R/fun_get_slice_crossing_df.R"))
+#source(paste0(here::here(),"/../trajectory-slicing-Rpackage/package_code/R/fun_create_radial_guide_df.R"))
+#some world maps
+
+
+world_with_borders = map_data("world")
+#world_without_borders = readRDS(paste0(here::here(),"/miscellaneous/worldmap_continents.rds")) #a worldmap without country borders that I've created
+```
+
+##data import and prepping
+```{r, warning = FALSE, message = FALSE}
+set.seed(1000)
+#myHYS_E3 = readRDS("D:/slices.of.HYSPLIT_V2/slices.of.HYSPLIT/data/DARWIN_back_20d_run1/df/run_combined.rds")%>%
+  
+#myHYS_E3=readRDS("D:/slices.of.HYSPLIT_V2/slices.of.HYSPLIT/data/Maido_back_4d/run_combined.rds")%>%
+#myHYS_E3=readRDS("D:/slices.of.HYSPLIT_V2/slices.of.HYSPLIT/data/Mace_Head_back4d/run_combined.rds")%>%
+myHYS_E4=readRDS(paste0(here::here(),"/example_data/Mace_Head_back4d/run_combined.rds"))%>%
+#myHYS_E4=readRDS("D:/slices.of.HYSPLIT_V2/slices.of.HYSPLIT/data/V1_Cape_Point_5d/df/run_combined.rds")%>%
+#myHYS_E4=readRDS("D:/slices.of.HYSPLIT_V2/slices.of.HYSPLIT/data/V1_Chacaltaya_2015-2018/df/run_combined.rds")%>%
+  dplyr::mutate(get_polar_coords_geographical(lat,lon,lat_i,lon_i),.after=lon)%>%
+
+  #as I'm emitting trajectories from one single point of emission, the time of emission is unique to each trajectory. I'm using it as ID here.
+  dplyr::mutate(ID = traj_dt_i)%>%
+  #dplyr::filter(ID %in% sample(unique(.$ID), size = 3000))%>%
+  {.}
+
+#estimating how much difference in latitude, longitude, and radius can be expected in one time step. 
+#This is used to defined the "delta_filter" later. The goal is to save computational time. 
+delta_filter_estimate = myHYS_E4 %>%
+  dplyr::group_by(ID)%>%  
+  dplyr::arrange(hour_along)%>%
+  dplyr::summarise(across(.cols = c("radius","lat","lon"), .fns = function(x){abs(x-lag(x,1))}, .names = "{.col}_delta"))%>%
+  dplyr::ungroup()%>%
+  dplyr::summarise_at(vars(contains("delta")), function(x){quantile(x, 0.99,na.rm=TRUE)})
+
+#delta_filter_estimate
+```
+
+
+
+
+
+
+##computing the radial slices.
+```{r}
+slice_positions = seq(0.5,15,2)
+tic()
+sliced_df_CHC= data.table::rbindlist(lapply(slice_positions, 
+                                                function(x){get_slice_crossing_df(traj_df=myHYS_E4, slice_position = x,
+                                                                                  slice_type="radial",
+                                                                                  ID_columns = "ID",
+                                                                                  extra_vars = c("lat","lon","height","mixdepth"), 
+                                                                                  delta_filter = delta_filter_estimate$radius_delta[1])}))%>%
+  #the following column allows us to plot the angle with 0 (-> north) in the middle. This is usally more intuitive
+  dplyr::mutate(angle_wmean_Nmid = ifelse(angle_wmean <=180, angle_wmean, angle_wmean-360))
+toc()
+
+#dataframe for the "radial legend" in the plots
+radial_slice_df = create_radial_guide_df(slice_radius=slice_positions,lat_center = myHYS_E4$lat_i[1], lon_center = myHYS_E4$lon_i[1])
+```
+
+
+Lets cluster trajectories based on where they crossed the cylindrical slices. First we have to get data into an adequate format. For starters, we need to consider only ONE crossing of each slice per trajectory. (Remember that a trajectory can theoretically cross a slice several times). As representative crossing, we will take the last crossing before the trajectory arrives at the station. Then, we will transform the data into "wide format"
+
+```{r}
+sliced_df_CHC_last = sliced_df_CHC %>%
+  dplyr::group_by(ID, slice_position)%>%
+  #dplyr::arrange(ID,slice_position,hour_along_wmean)%>%
+  dplyr::filter(hour_along_wmean == max(hour_along_wmean))%>% # getting the last crossing per slice. Note that the "maximum" is calculated for each group (defined by ID and slice position) separately
+  dplyr::ungroup()
+
+
+#The sliced data is in long format (many rows, few columns). We need a wide format (few rows, many columns) for clustering.
+
+sliced_df_CHC_last_wide = sliced_df_CHC_last %>%
+  dplyr::select(ID, slice_position, angle_wmean)%>%
+  tidyr::pivot_wider(id_cols = "ID", names_from = slice_position, values_from = c("angle_wmean"),
+                     names_glue= "{slice_position}__{.value}")%>%
+  dplyr::arrange(ID)%>%
+  na.omit() #NAs are bad for clustering. In essence, this na.omit means that we're only taking the trajectory that crossed each slice at least once. 
+
+
+head(sliced_df_CHC_last_wide)
+```
+
+
+##preparing a matrix for clustering. \
+As we're clustering based on an angle, we have to deal with the discontinuity at 0 degrees (0 and 360 is the same direction). We can do this by rotating the angle gradually from 0 to 360 degrees and including this as new columns. This way, all trajectories are affected similarly by the discontinuity (and not only trajectories close to 0 degrees), so that the discontinuity doesn't bias the clustering results.\
+Note that this method increases quite importantly the number of columns to be clustered (and thus affects computational time), but kmeans is a fast and efficient algorithm, so it usually doesn't really matter. 
+```{r}
+angle_shifts = seq(0,359,5)#rotating from 0 to 360 degrees, in steps of a few degrees.
+
+k_list = list()
+for (i in 1:length(angle_shifts)){
+  k_list[[i]] = sliced_df_CHC_last_wide %>%
+    dplyr::select(!ID)%>% #we don't want to cluster on the ID column
+    dplyr::rename_at(vars(contains("angle")), function(x){paste0("V",i,"_",x)})%>%
+    dplyr::mutate_at(vars(contains("angle")), function(x){(x+angle_shifts[i])%%360})
+}
+myk_all = do.call(cbind, k_list)%>%
+  as.matrix()
+```
+
+##lets use the ellbow mode to evaluate what number of clusters might be appropiate.  
+```{r, fig.width = 5, fig.height = 4}
+set.seed(66)
+k.min = 1
+k.max = 12
+data = myk_all[sample(1:nrow(myk_all), 2000),] #I'm using a sample of all rows for the ellbow method to save computational time.
+wss = sapply(k.min:k.max, 
+              function(k){kmeans(data, k)$tot.withinss})
+wss
+
+plot(k.min:k.max, wss,
+     type="b", pch = 1, 
+     xlab="Number of clusters K",
+     ylab="Total within-clusters sum of squares")
+```
+
+```{r}
+library(factoextra)
+fviz_nbclust(data, kmeans, method='silhouette')
+```
+
+
+There isn't a clear ellbow, but anything between 4 and 6 clusters seems reasonable. I'm gonna proceed with 6 clusters for this example. In any case, note that the "right" number of clusters most often depends on the research question.\
+
+##Now performing the k means clustering and assigning the right cluster to each trajectory ID
+```{r}
+set.seed(42) 
+myclustering = kmeans(myk_all, centers = 5) 
+
+clus_IDs = sliced_df_CHC_last_wide %>%
+  dplyr::mutate(cluster = myclustering$cluster)%>%
+  dplyr::select(ID, cluster)
+```
+
+
+
+##plotting trajectory plots to visualize the clusters. As plotting ALL trajectories will take forever, I just take a random and appropiately sized subsample of all trajectories.
+```{r}
+set.seed(42)
+myHYS_sample = myHYS_E4 %>%
+  dplyr::full_join(., clus_IDs)%>%
+  dplyr::filter(ID %in% sample(unique(myHYS_E4$ID), size = 300))%>%
+  dplyr::filter(!is.na(cluster))%>%
+  dplyr::mutate(cluster=as.character(cluster))
+
+ggplot(myHYS_sample, aes(x=lon, y = lat, colour=cluster, group=ID))+
+  geom_polygon(data = world_with_borders, aes(x=long, y=lat, group=group), color='transparent', fill="gray", inherit.aes=FALSE)+
+  geom_path(data=radial_slice_df, aes(x=lon, y = lat, group=slice_position), inherit.aes=FALSE, alpha=0.6)+
+  geom_path()+
+  geom_path(data = world_with_borders, aes(x=long, y=lat, group=group), color='black', linewidth=0.7, inherit.aes=FALSE)+
+  coord_cartesian(xlim = myHYS_E4$lon_i[1]+12.5*c(-1,1), ylim =myHYS_E4$lat_i[1]+12.5*c(-1,1))
+```
+In the above plot we see that the clustering appears to work well, but that some trajectories criss-cross all over the place. This is because these trajectories may cross some slices more than once (remember: We only took the last slice crossing to compute the clustering). To only take the "purest" trajectories, we can exclude those trajectories that crossed any slice more than once.
+
+```{r}
+#getting a vector of all trajectories that crossed at least one slice more than once
+IDs_multicross = sliced_df_CHC%>%
+  dplyr::group_by(ID, slice_position)%>%
+  dplyr::summarise(numb = sum(!is.na(angle_wmean)))%>%
+  dplyr::filter(numb > 1)%>%
+  pull(ID)%>% unique()
+
+#what fraction of all trajectories crossed a slice more than once?
+print(paste0("The fraction of trajectories that crossed at least one slice more than once is: ", 
+             signif(length(IDs_multicross)/length(unique(sliced_df_CHC$ID)),3)))
+
+
+
+
+#redoing the plot, but this time excluding "multicross" IDs. 
+ggplot(myHYS_sample %>% dplyr::filter(!(ID %in% IDs_multicross)), 
+       aes(x=lon, y = lat, colour=cluster, group=ID))+
+  geom_polygon(data = world_with_borders, aes(x=long, y=lat, group=group), color='transparent', fill="gray", inherit.aes=FALSE)+
+  geom_path(data=radial_slice_df, aes(x=lon, y = lat, group=slice_position), inherit.aes=FALSE, alpha=0.6)+
+  geom_path()+
+  geom_path(data = world_with_borders, aes(x=long, y=lat, group=group), color='black', linewidth=0.7, inherit.aes=FALSE)+
+  coord_cartesian(xlim = myHYS_E4$lon_i[1]+12.5*c(-1,1), ylim =myHYS_E4$lat_i[1]+12.5*c(-1,1))
+```
+
+As expected, this looks much cleaner. It depends on the research question if "multicross" trajectories should be excluded or not. I will exclude them for the rest of this document.\
+\
+##footprint\
+Now let's visualize the footprint of each cluster. \
+For the footprint, I define the magnitudes "influence score" and the "normalized influence score". 
+I define the "influence score" as the sum of all trajectory endpoints falling into a cell, multiplied by the radius between cell centerpoint and the trajectory arrival point.\
+\
+(The advantage of multiplication by the distance between cell and centerpoint is that this way the colorscale is not dominated by cells close to the origin.)
+\
+To get the "normalized influence score", I divide, for each cluster separately, the influence score of each cell by the maximum influence score of all cells. 
+```{r}
+myHYS_E4.foot = myHYS_E4 %>%
+  dplyr::full_join(., clus_IDs)%>%
+  #dplyr::filter(!(ID %in% IDs_multicross))%>%
+  dplyr::mutate(lat_cut = cut(lat, seq(-90,90,0.5)),
+                lon_cut = cut(lon, seq(-180,180,0.5)))%>%
+  dplyr::group_by(cluster, lat_cut, lon_cut)%>%
+  dplyr::summarise(sum = sum(!is.na(height)),
+                   radmean = mean(radius,na.rm=TRUE))%>%
+  dplyr::mutate(get_interval_bounds(lat_cut, "lat"),
+                get_interval_bounds(lon_cut, "lon"))%>%
+  dplyr::group_by(cluster)%>%
+  dplyr::mutate(sum_times_rad = sum*radmean,
+                sum_rad_norm = sum_times_rad/max(sum_times_rad,na.rm=TRUE),
+                sum_norm = sum/max(sum,na.rm=TRUE))
+
+myHYS_E4.foot_filtered = myHYS_E4 %>%
+  dplyr::full_join(., clus_IDs)%>%
+  dplyr::filter(!(ID %in% IDs_multicross))%>%
+  dplyr::mutate(lat_cut = cut(lat, seq(-90,90,0.5)),
+                lon_cut = cut(lon, seq(-180,180,0.5)))%>%
+  dplyr::group_by(cluster, lat_cut, lon_cut)%>%
+  dplyr::summarise(sum = sum(!is.na(height)),
+                   radmean = mean(radius,na.rm=TRUE))%>%
+  dplyr::mutate(get_interval_bounds(lat_cut, "lat"),
+                get_interval_bounds(lon_cut, "lon"))%>%
+  dplyr::group_by(cluster)%>%
+  dplyr::mutate(sum_times_rad = sum*radmean,
+                sum_rad_norm = sum_times_rad/max(sum_times_rad,na.rm=TRUE),
+                sum_norm = sum/max(sum,na.rm=TRUE))
+
+
+p_footprint_radial = ggplot(data=myHYS_E4.foot, 
+                            aes(xmin = lon_inf, xmax=lon_sup, ymin =lat_inf, ymax=lat_sup, fill=sum_norm))+
+  facet_wrap(~cluster, labeller = labeller(cluster = function(x){paste0("cluster ",x)}))+
+  geom_polygon(data = world_with_borders, aes(x=long, y=lat, group=group), color='transparent', fill="gray", inherit.aes=FALSE)+
+  geom_rect()+
+  geom_path(data = world_with_borders, aes(x=long, y=lat, group=group), color='black', linewidth=0.7, inherit.aes=FALSE)+
+  geom_path(data=radial_slice_df, aes(x=lon, y = lat, group=slice_position), inherit.aes=FALSE, alpha=0.3, col="red")+
+  annotate(geom="point", x = myHYS_E4$lon_i[1], y = myHYS_E4$lat_i[1], colour="red")+
+  scale_fill_viridis_c(trans="log10",  oob=squish)+
+  coord_cartesian(xlim = myHYS_E4$lon_i[1]+12.5*c(-1,1), ylim = myHYS_E4$lat_i[1]+12.5*c(-1,1))+
+  labs(x="longitude", y = "latitude", fill = "normalized\ninfluence\nscore",
+       caption="influence score of a cell defined as: normalized influence multiplied by radius")
+
+
+p_footprint_radial_filtered = ggplot(data=myHYS_E4.foot_filtered, 
+       aes(xmin = lon_inf, xmax=lon_sup, ymin =lat_inf, ymax=lat_sup, fill=sum_norm))+
+  facet_wrap(~cluster, labeller = labeller(cluster = function(x){paste0("cluster ",x)}))+
+  geom_polygon(data = world_with_borders, aes(x=long, y=lat, group=group), color='transparent', fill="gray", inherit.aes=FALSE)+
+  geom_rect()+
+  geom_path(data = world_with_borders, aes(x=long, y=lat, group=group), color='black', linewidth=0.7, inherit.aes=FALSE)+
+  geom_path(data=radial_slice_df, aes(x=lon, y = lat, group=slice_position), inherit.aes=FALSE, alpha=0.3, col="red")+
+  annotate(geom="point", x = myHYS_E4$lon_i[1], y = myHYS_E4$lat_i[1], colour="red")+
+  scale_fill_viridis_c(trans="log10",  oob=squish)+
+  coord_cartesian(xlim = myHYS_E4$lon_i[1]+12.5*c(-1,1), ylim = myHYS_E4$lat_i[1]+12.5*c(-1,1))+
+  labs(x="longitude", y = "latitude", fill = "normalized\ninfluence\nscore",
+       caption="influence score of a cell defined as: normalized influence multiplied by radius")
+
+p_footprint_radial
+p_footprint_radial_filtered
+```
+
+
+#how does the clustering look like in "slice space"? 
+```{r, fig.width = 15, fig.height = 6}
+sliced_df_CHC_last_clus = sliced_df_CHC_last %>%
+  dplyr::full_join(., clus_IDs)%>%
+  dplyr::filter(!(ID %in% IDs_multicross),
+                !is.na(cluster)) #filtering out trajectories that didn't cross all slices
+
+ggplot(sliced_df_CHC_last_clus, aes(x=angle_wmean_Nmid, colour=as.character(cluster), y = height_wmean))+
+  geom_point(alpha = 0.5)+
+  #coord_polar(direction = -1)+
+  scale_x_continuous(breaks = seq(-180,179,45), limits = c(-180,180))+
+  facet_wrap(~slice_position, labeller = labeller(slice_position = function(x){paste0("radius = ",x)}))
+```
+
+##visualizing cluster centers\
+It is also interesting to calculate the cluster centers in cylindrical slice space. As a mean of dispersion, I also calculate the inter-quartile-range for the angle and height of slice crossing for each radius and cluster. Don't forget to use circular functions for circular variables!
+```{r}
+slice_clus_centers =sliced_df_CHC_last_clus %>%
+  dplyr::group_by(cluster, slice_position)%>%
+  dplyr::summarise(angle_median = median.circular(angle_wmean),
+                   angle_lower = quantile.circular(angle_wmean, probs = 0.25, na.rm=TRUE),
+                   angle_upper = quantile.circular(angle_wmean, probs = 0.75, na.rm=TRUE),
+                   height_median = median(height_wmean),
+                   height_lower = quantile(height_wmean, 0.25,na.rm=TRUE),
+                   height_upper = quantile(height_wmean, 0.75, na.rm=TRUE))%>%
+  dplyr::mutate(cluster=factor(cluster))
+```
+
+and visualizing these centers. Note that I'm visualizing the height of the clustered trajectories as well, even though it didn't influence the clustering.
+```{r}
+#I want to plot errorbars. There is one pesky thing to address: If the errorbar crossed the discontinuity at 0/360 degrees, this will
+#lead to weird artifacts. To fix this, I'm gonna plot 2 different data frames adjusted for this issue. 
+errorbar_frame_1 = slice_clus_centers %>%
+  dplyr::mutate(angle_upper = ifelse(angle_upper < angle_lower, 360, angle_upper))
+errorbar_frame_2 =  slice_clus_centers %>%
+  dplyr::filter(angle_upper < angle_lower)%>%
+  dplyr::mutate(angle_lower = 0)
+
+
+ggplot(slice_clus_centers, aes(x=angle_median, y = height_median, colour = cluster ))+
+  #geom_errorbar(aes(ymin = height_lower, ymax = height_upper))+
+  geom_rect(data=errorbar_frame_1, aes(xmin = angle_lower, xmax=angle_upper, ymin = height_lower, ymax=height_upper, fill=cluster),alpha=0.3, linetype=0)+
+  geom_rect(data=errorbar_frame_2, aes(xmin = angle_lower, xmax=angle_upper, ymin = height_lower, ymax=height_upper, fill=cluster),alpha=0.3, linetype=0)+
+  #geom_errorbarh(data=errorbar_frame_1,aes(xmin = angle_lower, xmax = angle_upper))+
+  #geom_errorbarh(data=errorbar_frame_2,aes(xmin = angle_lower, xmax = angle_upper))+
+    geom_point()+
+  #coord_polar()+
+  scale_x_continuous(breaks = seq(0,360,90), limits = c(0,360))+
+  facet_wrap(~slice_position, labeller = labeller(slice_position = function(x){paste0("radius = ",x)}))+
+  labs(y = "height [magl]", x = "angle [degrees from north]", title = "cluster centers",
+       caption = "shaded areas enclose 25th to 75th percentiles")
+```
+
+
+##I'll perform a tradiational "lat-lon" clustering for comparison
+```{r}
+##ordering the df
+myHYS_E4_sel = myHYS_E4%>%
+  dplyr::select(ID,hour_along, lat, lon)%>%
+  dplyr::arrange(ID, hour_along)
+
+##pivoting it wider, so that each ID is its own row
+myHYS_E4_sel_wide = myHYS_E4_sel %>%
+  dplyr::group_by(ID)%>% 
+  #dplyr::select(ID, slice_position, angle_wmean)%>%
+  tidyr::pivot_wider(id_cols = "ID", names_from = hour_along, values_from = c("lon","lat"),
+                     names_glue= "{hour_along}__{.value}")%>%
+  dplyr::ungroup()
+
+
+set.seed(42) 
+myclustering_latlon = kmeans(myHYS_E4_sel_wide %>%dplyr::select(!ID)%>% as.matrix(), centers = 5) 
+
+clus_IDs_latlon = myHYS_E4_sel_wide %>%
+  dplyr::ungroup()%>%
+  dplyr::mutate(cluster = myclustering_latlon$cluster)%>%
+  dplyr::select(ID, cluster)
+```
+
+
+```{r}
+latlon_clustered.foot = myHYS_E4_sel %>%
+  dplyr::full_join(.,clus_IDs_latlon)%>%
+  #dplyr::filter(!(ID %in% IDs_multicross))%>%
+  #dplyr::full_join(., clus_IDs)%>%
+  dplyr::mutate(lat_cut = cut(lat, seq(-90,90,0.5)),
+                lon_cut = cut(lon, seq(-180,180,0.5)))%>%
+  dplyr::group_by(cluster, lat_cut, lon_cut)%>%
+  dplyr::summarise(sum = sum(!is.na(lat)),
+                   #radmean = mean(radius,na.rm=TRUE)
+                   )%>%
+  dplyr::mutate(get_interval_bounds(lat_cut, "lat"),
+                get_interval_bounds(lon_cut, "lon"))%>%
+  dplyr::group_by(cluster)%>%
+  dplyr::mutate(#sum_times_rad = sum*radmean,
+              #  sum_rad_norm = sum_times_rad/max(sum_times_rad,na.rm=TRUE),
+                sum_norm = sum/max(sum,na.rm=TRUE)
+    )
+
+p_footprint_latlon = ggplot(latlon_clustered.foot  %>% dplyr::filter(!is.na(cluster)), #not showing "NA" cluster, which corresponds to trajectories that did not cross any of the slices
+                            aes(xmin = lon_inf, xmax=lon_sup, ymin =lat_inf, ymax=lat_sup, fill=sum_norm))+
+  facet_wrap(~cluster, labeller = labeller(cluster = function(x){paste0("cluster ",x)}))+
+  geom_polygon(data = world_with_borders, aes(x=long, y=lat, group=group), color='transparent', fill="gray", inherit.aes=FALSE)+
+  geom_rect()+
+  geom_path(data = world_with_borders, aes(x=long, y=lat, group=group), color='black', linewidth=0.7, inherit.aes=FALSE)+
+  annotate(geom="point", x = myHYS_E4$lon_i[1], y = myHYS_E4$lat_i[1], colour="red")+
+  geom_path(data=radial_slice_df, aes(x=lon, y = lat, group=slice_position), inherit.aes=FALSE, alpha=0.3, col="red")+
+  scale_fill_viridis_c(trans="log10",  oob=squish)+
+  coord_cartesian(xlim = myHYS_E4$lon_i[1]+12.5*c(-1,1), ylim = myHYS_E4$lat_i[1]+12.5*c(-1,1))+
+  labs(x="longitude", y = "latitude", fill = "normalized\ninfluence\nscore",
+       caption="influence score of a cell defined as: normalized influence multiplied by radius")
+
+p_footprint_latlon
+```
+
+#how many trajectories were clustered? If filtering was applied, how many trajectories were lost?
+```{r}
+length_all = myHYS_E4 %>% pull(ID)%>%unique()%>%length()
+
+length_latlon_clus = myHYS_E4 %>% pull(ID)%>% unique() %>% length()
+
+length_radial_all = myHYS_E4 %>%
+  dplyr::full_join(., clus_IDs)%>%
+  pull(ID)%>%unique()%>%length()
+
+length_radial_filtered = myHYS_E4 %>%
+  dplyr::full_join(., clus_IDs)%>%
+  dplyr::filter(!(ID %in% IDs_multicross))%>%
+  #dplyr::filter(!is.na(cluster))%>%
+  pull(ID)%>%unique()%>%length()
+
+```
+
+```{r}
+xlims = myHYS_E4$lon_i[1]+15*c(-1,1)
+ylims = myHYS_E4$lat_i[1]+15*c(-1,1)
+
+p_footprint_latlon + 
+  coord_cartesian(xlim = xlims, ylim = ylims)+
+  labs(title = "kmeans based on latitude & longitude",subtitle = paste0("n = ", length_latlon_clus))
+
+p_footprint_radial + 
+  coord_cartesian(xlim = xlims, ylim = ylims)+
+  labs(title = "kmeans based on angle (radial slices)", subtitle = paste0("n = ", length_radial_all))
+
+p_footprint_radial_filtered + coord_cartesian(xlim = xlims, ylim = ylims)+
+  labs(title = "kmeans based on angle (radial slices); multicrosses excluded",
+                                   subtitle = paste0("n = ", length_radial_filtered))
+```
+
+It is interesting to compare these clustering techniques. Cleanest separation, within the range of considered radii, appears to be obtained upon cylindrical clustering and filtering out of "multicross" trajectories. However, some trajectories are lost this way (~25%). 
+

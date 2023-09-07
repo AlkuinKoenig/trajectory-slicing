@@ -1,0 +1,198 @@
+---
+title: "Trajectory slicing: Example 1"
+output:
+  html_document:
+    code_folding: hide
+    df_print: paged
+---
+
+This is an example to visualize the basic idea of the "slicing technique".
+
+##used libraries and functions
+```{r, warning = FALSE, message = FALSE}
+library(tidyr)#for crunching
+library(dplyr)#for crunching. Especially the "case_when" function
+library(data.table)#for crunching (specifically rbindlist, which is fast). 
+library(circular)#for circular variables (the angle) and circular means
+library(tictoc)#for time keeping
+library(rgdal)#for maps
+library(maps)#for maps
+library(scales)#for plotting
+library(magrittr)#for the maps
+library(ggplot2)#for plotting
+library(patchwork)#for combining plots
+library(trajectory.slicing)
+
+#In case you have problems with getting a compiled trajectory.slicing library and with getting it compiled yourself, you can also directly source the needed custom functions by uncommenting what is below. 
+#source(paste0(here::here(),"/../trajectory-slicing-Rpackage/package_code/R/fun_get_polar_coords_geographical.R"))
+#source(paste0(here::here(),"/../trajectory-slicing-Rpackage/package_code/R/fun_get_slice_crossing_df.R"))
+#source(paste0(here::here(),"/../trajectory-slicing-Rpackage/package_code/R/fun_create_radial_guide_df.R"))
+```
+
+##data import and prepping
+```{r}
+set.seed(50)#I like 50
+#myHYS = readRDS("D:/slices.of.HYSPLIT_V2/slices.of.HYSPLIT/data/DARWIN_back_20d_run1/df/run_combined.rds")%>%
+  
+#myHYS=readRDS("D:/slices.of.HYSPLIT_V2/slices.of.HYSPLIT/data/Maido_back_4d/run_combined.rds")%>%
+myHYS=readRDS(paste0(here::here(),"/example_data/Mace_Head_back4d/run_combined.rds"))%>%
+  #randomly selecting 5 trajectories.
+  dplyr::filter(traj_dt_i %in% unique(.$traj_dt_i)[sample(1:length(unique(.$traj_dt_i)), 5, replace=FALSE)])%>%
+  #adding angle and radius columns that are needed for radial slicing
+  dplyr::mutate(get_polar_coords_geographical(lat,lon,lat_i,lon_i),.after=lon)%>%
+  #creating ID colums that are needed for all slicing.
+  dplyr::mutate(ID_time = format(traj_dt_i, '%Y%m%d%H'),
+                ID_location = paste0("Y_",lat_i,"_X_",lon_i,"_E_",height_i))
+
+#estimating how much difference in latitude, longitude, and radius can be expected in one time step. 
+#This is used to defined the "delta_filter" later. The goal is to save computational time. 
+delta_filter_estimate = myHYS %>%
+  dplyr::group_by(ID_time, ID_location)%>%
+  dplyr::arrange(hour_along)%>%
+  dplyr::summarise(across(.cols = c("radius","lat","lon"), .fns = function(x){abs(x-lag(x,1))}, .names = "{.col}_delta"))%>%
+  dplyr::ungroup()%>%
+  dplyr::summarise_at(vars(contains("delta")), function(x){quantile(x, 0.99,na.rm=TRUE)})
+
+delta_filter_estimate
+```
+
+##create latitudinal, longitudinal, and radial slice dataframes.
+```{r}
+tic()
+test_df_lat= data.table::rbindlist(lapply(c(45,50,55,60), 
+                                          function(x){get_slice_crossing_df(traj_df=myHYS, slice_position = x, slice_type="latitudinal", 
+                                                                            ID_columns = c("ID_time","ID_location"),
+                                                                            extra_vars = c("height","mixdepth"), 
+                                                                            delta_filter = delta_filter_estimate$lat_delta[1])}))
+toc()
+
+tic()
+test_df_lon= data.table::rbindlist(lapply(c(-30,-20,0,10), 
+                                          function(x){get_slice_crossing_df(traj_df=myHYS, slice_position = x, slice_type="longitudinal",
+                                                                            ID_columns = c("ID_time","ID_location"), 
+                                                                            extra_vars = c("height","mixdepth"), 
+                                                                            delta_filter = delta_filter_estimate$lon_delta[1])}))
+toc()
+
+
+tic()
+test_df_rad= data.table::rbindlist(lapply(c(5,10,15,20), 
+                                          function(x){get_slice_crossing_df(traj_df=myHYS, slice_position = x, slice_type="radial", 
+                                                                            ID_columns = c("ID_time","ID_location"),
+                                                                            extra_vars = c("lat","lon","height","mixdepth"), 
+                                                                            delta_filter = delta_filter_estimate$radius_delta[1])}))%>%
+  #the following column allows us to plot the angle with 0 (-> north) in the middle. This is usally more intuitive
+  dplyr::mutate(angle_wmean_Nmid = ifelse(angle_wmean <=180, angle_wmean, angle_wmean-360))
+toc()
+```
+#note that radial slicing takes longer, because the circular weighted mean (for the angle) is more expensive to compute.
+
+
+##we'll prepare a world map for our plots
+```{r, fig.width = 6, fig.height =4}
+#Using the original maps package, then converting map into SpatialPolygons object
+world <- maps::map("world", fill=TRUE) %$%
+  maptools::map2SpatialPolygons(., IDs=names,proj4string=CRS("+proj=longlat +datum=WGS84 +no_defs"))
+#The resulting map has self intersection problems so any further operation reports errors; using buffers of width 0 is a fast fix
+while(rgeos::gIsValid(world)==FALSE){
+  world <- rgeos::gBuffer(world, byid = TRUE, width = 0, quadsegs = 5, capStyle = "ROUND")
+}
+#Dissolving polygon's limits
+world <- raster::aggregate(world)
+```
+
+##Plotting the "latlon" representation and the "slice representation" side by side. 
+##First, the latitudinal slices. 
+```{r, fig.width = 8, fig.height = 4}
+#latitudinal slices
+p1 = ggplot(data=myHYS, aes(x=lon, y = lat, group = interaction(ID_time, ID_location),colour = interaction(ID_time, ID_location)))+
+  geom_path(size=0.2)+
+  geom_point(aes(x=unique(lon_i), y =unique(lat_i)), size=3, col="blue")+
+  geom_hline(yintercept = unique(test_df_lat$slice_position), linetype=2)+
+  geom_path(data = world, aes(x=long, y=lat, group=group), color='black', size=0.7, inherit.aes=FALSE)+
+  geom_point(data=test_df_lat, aes(x=lon_wmean, y = lat_wmean, group = interaction(ID_time, ID_location)))+
+  coord_cartesian(xlim = c(-45,15), ylim = c(40,80))+
+  theme_bw()+theme(legend.position = "none")
+
+p2 = ggplot(data=test_df_lat, aes(x=lon_wmean, y=height_wmean, shape = crossing_type, colour = interaction(ID_time)))+
+  geom_point()+
+  facet_wrap(~slice_position,ncol=1, labeller=labeller(slice_position = function(x){paste0("lat = ",x)}),
+             strip.position = "right")+
+  theme_bw()+theme(legend.position = "none")+
+  labs(x= "longitude of slice crossing", y = "altitude of slice crossing [magl]")
+
+p1+p2+plot_layout(widths = c(1,0.6))
+```
+
+#Now the longitudinal slices.
+```{r, fig.width = 8, fig.height = 4}
+#longitudinal slices
+p1=ggplot(data=myHYS, aes(x=lon, y = lat, group = interaction(ID_time, ID_location),colour = interaction(ID_time, ID_location)))+
+  geom_path(size=0.2)+
+  geom_point(aes(x=unique(lon_i), y =unique(lat_i)), size=3, col="blue")+
+  geom_vline(xintercept = unique(test_df_lon$slice_position), linetype=2)+
+  geom_path(data = world, aes(x=long, y=lat, group=group), color='black', size=0.7, inherit.aes=FALSE)+
+  geom_point(data=test_df_lon, aes(x=lon_wmean, y = lat_wmean, group = interaction(ID_time, ID_location)))+
+  coord_cartesian(xlim = c(-45,15), ylim = c(40,80))+
+  theme_bw()+theme(legend.position = "none")
+
+p2=ggplot(data=test_df_lon, aes(x=lat_wmean, y=height_wmean, shape = crossing_type, colour = interaction(ID_time)))+
+  geom_point()+
+  facet_wrap(~slice_position,ncol=1, labeller=labeller(slice_position = function(x){paste0("lon = ",x)}))+
+  theme_bw()+theme(legend.position = "none")+
+  labs(x= "latitude of slice crossing", y = "altitude of slice crossing [magl]")
+
+
+p1+p2+plot_layout(widths = c(1,0.6))
+```
+
+##Finally, the cylindrical (radial) slices. 
+```{r, fig.width = 8, fig.height = 4}
+#radial slices
+#creating a help data frame that allows us to plot circles on the map
+radial_slice_df = create_radial_guide_df(slice_radius=unique(test_df_rad$slice_position),
+                                         lat_center = test_df_rad$lat_i[1], lon_center = test_df_rad$lon_i[1])
+
+p1=ggplot(data=myHYS, aes(x=lon, y = lat, group = interaction(ID_time, ID_location),colour = interaction(ID_time, ID_location)))+
+  geom_path(size=0.2)+
+  geom_point(aes(x=unique(lon_i), y =unique(lat_i)), size=3, col="blue")+
+  geom_path(data=radial_slice_df, aes(x=lon, y = lat, group=slice_position), inherit.aes=FALSE,linetype=2)+
+  geom_path(data = world, aes(x=long, y=lat, group=group), color='black', size=0.7, inherit.aes=FALSE)+
+  geom_point(data=test_df_rad, aes(x=lon_wmean, y = lat_wmean, group = interaction(ID_time, ID_location)),size=2)+
+  coord_cartesian(xlim = c(-45,15), ylim = c(40,80))+
+  theme_bw()+theme(legend.position = "none")
+
+p2=ggplot(data=test_df_rad, aes(x=angle_wmean_Nmid, y=height_wmean, shape = crossing_type, colour = interaction(ID_time)))+
+  geom_point()+
+  facet_wrap(~slice_position,ncol=1, labeller=labeller(slice_position = function(x){paste0("radius = ",x)}))+
+  scale_x_continuous(breaks = seq(-180,180,45), limits = c(-180,180))+
+  scale_y_continuous(breaks = seq(0,2000,500))+
+  theme_bw()+theme(legend.position = "none")+
+  labs(x= "angle of slice crossing", y = "altitude of slice crossing [magl]")
+
+p1+p2+plot_layout(widths = c(1,0.6))
+```
+
+<!-- ##and plotting how this looks like in "slice space" -->
+<!-- ```{r, fig.width = 4, fig.height =5} -->
+<!-- ggplot(data=test_df_lat, aes(x=lon_wmean, y=height_wmean, shape = crossing_type, colour = interaction(ID_time)))+ -->
+<!--   geom_point()+ -->
+<!--   facet_wrap(~slice_position,ncol=1, labeller=labeller(slice_position = function(x){paste0("lat = ",x)}))+ -->
+<!--   theme_bw()+theme(legend.position = "none")+ -->
+<!--   labs(x= "longitude of slice crossing", y = "altitude of slice crossing [magl]") -->
+
+
+<!-- ggplot(data=test_df_lon, aes(x=lat_wmean, y=height_wmean, shape = crossing_type, colour = interaction(ID_time)))+ -->
+<!--   geom_point()+ -->
+<!--   facet_wrap(~slice_position,ncol=1, labeller=labeller(slice_position = function(x){paste0("lon = ",x)}))+ -->
+<!--   theme_bw()+theme(legend.position = "none")+ -->
+<!--   labs(x= "latitude of slice crossing", y = "altitude of slice crossing [magl]") -->
+
+
+<!-- ggplot(data=test_df_rad, aes(x=angle_wmean_Nmid, y=height_wmean, shape = crossing_type, colour = interaction(ID_time)))+ -->
+<!--   geom_point()+ -->
+<!--   facet_wrap(~slice_position,ncol=1, labeller=labeller(slice_position = function(x){paste0("radius = ",x)}))+ -->
+<!--   scale_x_continuous(breaks = seq(-180,180,45), limits = c(-180,180))+ -->
+<!--   theme_bw()+theme(legend.position = "none")+ -->
+<!--   labs(x= "angle of slice crossing", y = "altitude of slice crossing [magl]") -->
+<!-- ``` -->

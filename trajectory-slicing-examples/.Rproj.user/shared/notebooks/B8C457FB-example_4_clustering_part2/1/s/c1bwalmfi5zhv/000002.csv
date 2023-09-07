@@ -1,0 +1,6 @@
+"0","set.seed(42) "
+"0","myclustering = kmeans(myk_all, centers = 11) "
+"0",""
+"0","clus_IDs = sliced_df_CHC_last_wide %>%"
+"0","  dplyr::mutate(cluster = myclustering$cluster)%>%"
+"0","  dplyr::select(ID, cluster)"

@@ -1,0 +1,183 @@
+---
+title: "Trajectory slicing: Example 2 - overview figures"
+output:
+  html_document:
+    code_folding: hide
+    df_print: paged
+---
+
+This is an example about how cylindrical slicing can be used to create plots to summarize data.
+
+##used libraries
+```{r, warning = FALSE, message = FALSE}
+library(tidyr)#for crunching
+library(magrittr)
+library(dplyr)#for crunching
+library(data.table)#for crunching (specifically rbindlist, which is fast). 
+library(circular)#for circular variables (the angle) and circular means
+library(tictoc)#for time keeping
+library(ggplot2)#for plotting
+library(rgdal)#for maps
+library(maps)#for maps
+library(scales)#for plotting
+library(patchwork)#excellent library for multipanel plots
+library(trajectory.slicing)
+
+#In case you have problems with getting a compiled trajectory.slicing library and with getting it compiled yourself, you can also directly source the needed custom functions by uncommenting what is below. 
+#source(paste0(here::here(),"/../trajectory-slicing-Rpackage/package_code/R/fun_get_polar_coords_geographical.R"))
+#source(paste0(here::here(),"/../trajectory-slicing-Rpackage/package_code/R/fun_get_slice_crossing_df.R"))
+#source(paste0(here::here(),"/../trajectory-slicing-Rpackage/package_code/R/fun_create_radial_guide_df.R"))
+```
+
+##data import and prepping
+```{r}
+#set.seed(50)#I like 50
+#myHYS = readRDS("D:/slices.of.HYSPLIT_V2/slices.of.HYSPLIT/data/DARWIN_back_20d_run1/df/run_combined.rds")%>%
+  
+#myHYS=readRDS("D:/slices.of.HYSPLIT_V2/slices.of.HYSPLIT/data/Maido_back_4d/run_combined.rds")%>%
+#myHYS=readRDS("D:/slices.of.HYSPLIT_V2/slices.of.HYSPLIT/data/Mace_Head_back4d/run_combined.rds")%>%
+myHYS=readRDS(paste0(here::here(),"/example_data/V1_Cape_Point_5d/df/run_combined.rds"))%>%
+  #randomly selecting 5 trajectories.
+  #dplyr::filter(traj_dt_i %in% unique(.$traj_dt_i)[sample(1:length(unique(.$traj_dt_i)), 5, replace=FALSE)])%>%
+  #adding angle and radius columns that are needed for radial slicing
+  dplyr::mutate(get_polar_coords_geographical(lat,lon,lat_i,lon_i),.after=lon)%>%
+  dplyr::mutate(ID = traj_dt_i)#as I'm emitting trajectories from one single point of emission, the time of emission is unique to each trajectory. I'm using it as ID here.
+
+#estimating how much difference in latitude, longitude, and radius can be expected in one time step. 
+#This is used to defined the "delta_filter" later. The goal is to save computational time. 
+delta_filter_estimate = myHYS %>%
+  dplyr::group_by(ID)%>%  
+  dplyr::arrange(hour_along)%>%
+  dplyr::summarise(across(.cols = c("radius","lat","lon"), .fns = function(x){abs(x-lag(x,1))}, .names = "{.col}_delta"))%>%
+  dplyr::ungroup()%>%
+  dplyr::summarise_at(vars(contains("delta")), function(x){quantile(x, 0.99,na.rm=TRUE)})
+
+delta_filter_estimate
+```
+
+##create latitudinal, longitudinal, and radial slice dataframes.
+```{r}
+tic()
+sliced_df= data.table::rbindlist(lapply(c(5,10,20), function(x){get_slice_crossing_df(traj_df=myHYS, slice_position = x, slice_type="radial",
+                                                                                        ID_columns = "ID",
+                                                                                        extra_vars = c("lat","lon","height","mixdepth"), delta_filter = delta_filter_estimate$radius_delta[1])}))%>%
+  #the following column allows us to plot the angle with 0 (-> north) in the middle. This is usally more intuitive
+  dplyr::mutate(angle_wmean_Nmid = ifelse(angle_wmean <=180, angle_wmean, angle_wmean-360))
+toc()
+```
+
+
+
+##let's do a plot based on the whole data to show preferred pathways of transport
+##first, we summarise by lat/lon binning (this is a "classical" approach)
+```{r, fig.width = 5, fig.height =6}
+test_df_latlon.s = myHYS %>%
+  dplyr::mutate(lat_cut = cut(lat, seq(-90,90,1),include.lowest=TRUE),
+                lon_cut = cut(lon, seq(-360,360,1), include.lowest=TRUE))%>%
+  dplyr::group_by(lat_cut, lon_cut)%>%
+  dplyr::summarise(sum = sum(!is.na(height)))%>%
+  dplyr::mutate(get_interval_bounds(lat_cut, "lat"),
+                get_interval_bounds(lon_cut, "lon"))%>%
+  dplyr::mutate(sum_normalized = sum/max(.$sum))
+```
+
+##we'll prepare a world map for our plots
+```{r, fig.width = 6, fig.height =4}
+#Using the original maps package, then converting map into SpatialPolygons object
+world <- maps::map("world", fill=TRUE) %$%
+  maptools::map2SpatialPolygons(., IDs=names,proj4string=CRS("+proj=longlat +datum=WGS84 +no_defs"))
+#The resulting map has self intersection problems so any further operation reports errors; using buffers of width 0 is a fast fix
+while(rgeos::gIsValid(world)==FALSE){
+  world <- rgeos::gBuffer(world, byid = TRUE, width = 0, quadsegs = 5, capStyle = "ROUND")
+}
+#Dissolving polygon's limits
+world <- raster::aggregate(world)
+```
+
+##let's set up a visualization of the polar coordinate system and plot this on a map
+```{r, fig.width = 7, fig.height =4}
+radial_slice_df = create_radial_guide_df(slice_radius = unique(sliced_df$slice_position),
+                                         lon_center = unique(sliced_df$lon_i)%>%na.omit(),
+                                         lat_center = unique(sliced_df$lat_i)%>%na.omit())
+
+p_latlon = ggplot(data=test_df_latlon.s, aes(xmin=lon_inf, xmax=lon_sup, ymin = lat_inf, ymax=lat_sup, fill = sum_normalized))+
+   geom_rect()+
+  geom_point(data = world, aes(x=long, y=lat, group=group), color='black', size=0.7, inherit.aes=FALSE)+
+  geom_path(data=radial_slice_df, aes(x=lon, y = lat, group = slice_position),inherit.aes=FALSE, col = "red")+
+  geom_text(data=radial_slice_df %>% dplyr::filter(angle %in% c(0,90,180,270), slice_position == max(slice_position)), 
+            aes(x=lon, y = lat, label = angle_180), inherit.aes=FALSE, colour="red")+
+  scale_fill_viridis_c(trans="log10")+
+  #coord_cartesian(ylim = c(25,75),xlim = c(-60,40))+
+  coord_cartesian(ylim = c(-80,-10),xlim = c(-50,65))+ #note that I'm "zooming in"
+  theme_bw()
+
+p_latlon
+```
+
+##In "radial slice space", the plot looks like this. Note that you can always change the binning
+```{r, fig.width = 5, fig.height =4.5}
+
+sliced_df.s = sliced_df %>%
+  dplyr::mutate(angle_cut = cut(angle_wmean_Nmid, seq(-360,360,6),include.lowest=TRUE),
+                height_cut = cut(height_wmean, c(0,100,500,1000,1500,2000,3000,4000), include.lowest=TRUE))%>%
+  dplyr::group_by(angle_cut, height_cut, slice_position)%>%
+  dplyr::summarise(crossings_decreasing = sum(crossing_type=="decreasing"),
+                   crossings_increasing = sum(crossing_type=="increasing"),
+                   .groups = "drop")%>%
+  dplyr::mutate(get_interval_bounds(angle_cut, "angle"),
+                get_interval_bounds(height_cut, "height"))%>%
+ # dplyr::group_by(slice_position)%>%
+  dplyr::mutate(across(.cols = contains("crossings"), .fns = function(x){x/max(x,na.rm=TRUE)},
+                       .names = "{.col}_norm1"))%>%
+  #dplyr::ungroup()%>%
+  dplyr::mutate(across(contains("_norm1"), function(x){ifelse(x==0, NA, x)}))
+
+
+
+p_rad1=ggplot(data=sliced_df.s, aes(xmin = angle_inf, xmax = angle_sup, ymin = height_inf, ymax = height_sup, fill = crossings_decreasing_norm1))+
+  facet_wrap(~slice_position, ncol=1, 
+             labeller = labeller(slice_position = function(x){paste0("radius = ",x,"°")}), #pimping the strip label a bit
+             strip.position = "right")+
+  geom_rect()+
+  scale_fill_viridis_c(na.value="transparent", trans="log10")+
+  scale_x_continuous(breaks = seq(-180,180,45))+
+  theme_bw()+
+  labs(x="angle from north [°]", y = "altitude [masl]", fill = "inward\ncrossings\n[normalized]")
+
+p_rad1
+```
+
+
+##we can also extract information about the mean boundary layer height (mixing height) at the moment of slice crossing and add it to the plot!
+```{r, fig.width = 5, fig.height = 4.5}
+mixdepth_df = sliced_df %>%
+  dplyr::mutate(angle_cut = cut(angle_wmean_Nmid, seq(-360,360,6),include.lowest=TRUE))%>%
+  dplyr::group_by(angle_cut, slice_position)%>%
+  dplyr::summarise(mixdepth_wmean = mean(mixdepth_wmean,na.rm=TRUE), .groups = "drop")%>%
+  dplyr::mutate(get_interval_bounds(angle_cut, "angle"))
+
+
+p_rad2=ggplot(data=sliced_df.s, aes(xmin = angle_inf, xmax = angle_sup, ymin = height_inf, ymax = height_sup, fill = crossings_decreasing_norm1))+
+   facet_wrap(~slice_position,ncol=1, 
+             labeller = labeller(slice_position = function(x){paste0("radius = ",x,"°")}), #pimping the strip label a bit
+             strip.position = "right")+
+  geom_rect()+
+  geom_segment(data=mixdepth_df, aes(x=angle_inf, xend =angle_sup, y = mixdepth_wmean, yend = mixdepth_wmean, colour ="mean BL\nheight [magl]"),
+               inherit.aes=FALSE,size=1)+
+  scale_fill_viridis_c(na.value="transparent", trans="log10")+
+  scale_x_continuous(breaks = seq(-180,180,45))+
+  theme_bw()+
+  labs(x="angle from north [°]", y = "altitude [magl]", fill = "inward\ncrossings\n[normalized]", colour="")
+
+p_rad2
+```
+
+let's combine these plots. We'll use the excellent "patchwork" library for this. 
+```{r, fig.width = 8, fig.height =4.5}
+(p_latlon + p_rad2 & theme(legend.position = "bottom") & 
+    labs(fill = "normalized\ninfluence")&
+    scale_fill_viridis_c(na.value="transparent", trans="log10", limits = c(1e-3,1)))+ plot_layout(widths = c(1,0.5), guides = "collect")
+```
+Note one advantage of the radial slicing - the relative cell influence on the radial slices is much less dominated by cells that are close to the origin than in the regular lat/lon plot! (The difference is even larger if a linear color scale is used.)
+
+

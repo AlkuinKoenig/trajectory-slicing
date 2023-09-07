@@ -1,0 +1,31 @@
+"0","set.seed(50)#I like 50"
+"0","#myHYS = readRDS(""D:/slices.of.HYSPLIT_V2/slices.of.HYSPLIT/data/DARWIN_back_20d_run1/df/run_combined.rds"")%>%"
+"0","  "
+"0","#myHYS=readRDS(""D:/slices.of.HYSPLIT_V2/slices.of.HYSPLIT/data/Maido_back_4d/run_combined.rds"")%>%"
+"0","myHYS=readRDS(paste0(here::here(),""/example_data/Mace_Head_back4d/run_combined.rds""))%>%"
+"0","  #randomly selecting 5 trajectories."
+"0","  dplyr::filter(traj_dt_i %in% unique(.$traj_dt_i)[sample(1:length(unique(.$traj_dt_i)), 5, replace=FALSE)])%>%"
+"0","  #adding angle and radius columns that are needed for radial slicing"
+"0","  dplyr::mutate(get_polar_coords_geographical(lat,lon,lat_i,lon_i),.after=lon)%>%"
+"0","  #creating ID colums that are needed for all slicing."
+"0","  dplyr::mutate(ID_time = format(traj_dt_i, '%Y%m%d%H'),"
+"0","                ID_location = paste0(""Y_"",lat_i,""_X_"",lon_i,""_E_"",height_i))"
+"0",""
+"0","#estimating how much difference in latitude, longitude, and radius can be expected in one time step. "
+"0","#This is used to defined the ""delta_filter"" later. The goal is to save computational time. "
+"0","delta_filter_estimate = myHYS %>%"
+"0","  dplyr::group_by(ID_time, ID_location)%>%"
+"0","  dplyr::arrange(hour_along)%>%"
+"0","  dplyr::summarise(across(.cols = c(""radius"",""lat"",""lon""), .fns = function(x){abs(x-lag(x,1))}, .names = ""{.col}_delta""))%>%"
+"0","  dplyr::ungroup()%>%"
+"0","  dplyr::summarise_at(vars(contains(""delta"")), function(x){quantile(x, 0.99,na.rm=TRUE)})"
+"2","Warning:"
+"2"," [38;5;254mReturning more (or less) than 1 row per `summarise()` group was deprecated in dplyr 1.1.0.
+[36mi[38;5;254m Please use `reframe()` instead.
+[36mi[38;5;254m When switching from `summarise()` to `reframe()`, remember that `reframe()` always returns an ungrouped data frame and
+  adjust accordingly.
+[90mCall `lifecycle::last_lifecycle_warnings()` to see where this warning was generated.[38;5;254m[39m
+"
+"1","[38;5;254m`summarise()` has grouped output by 'ID_time', 'ID_location'. You can override using the `.groups` argument.[39m
+"
+"0","delta_filter_estimate"

@@ -1,0 +1,11 @@
+"0","slice_clus_centers =sliced_df_CHC_last_clus %>%"
+"0","  dplyr::group_by(cluster, slice_position)%>%"
+"0","  dplyr::summarise(angle_median = median.circular(angle_wmean),"
+"0","                   angle_lower = quantile.circular(angle_wmean, probs = 0.25, na.rm=TRUE),"
+"0","                   angle_upper = quantile.circular(angle_wmean, probs = 0.75, na.rm=TRUE),"
+"0","                   hour_along_median = median(hour_along_wmean),"
+"0","                   hour_along_lower = quantile(hour_along_wmean, 0.25,na.rm=TRUE),"
+"0","                   hour_along_upper = quantile(hour_along_wmean, 0.75, na.rm=TRUE))%>%"
+"0","  dplyr::mutate(cluster=factor(cluster))"
+"1","[38;5;254m`summarise()` has grouped output by 'cluster'. You can override using the `.groups` argument.[39m
+"

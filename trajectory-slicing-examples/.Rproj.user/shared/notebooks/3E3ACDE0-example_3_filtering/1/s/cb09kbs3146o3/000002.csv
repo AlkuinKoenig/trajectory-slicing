@@ -1,0 +1,13 @@
+"0","```r
+selection_mask2= sliced_df_2%>%
+  dplyr::filter(angle_wmean_Nmid>=angle_range[1], angle_wmean_Nmid <= angle_range[2])%>%
+  dplyr::group_by(slice_position, ID)%>%
+  dplyr::summarise(crossed = any(crossing_type == \"decreasing\"),.groups = \"drop\")%>%
+  dplyr::group_by(ID)%>%
+  dplyr::summarise(slices_crossed = sum(crossed>0,na.rm=TRUE))%>%
+  dplyr::filter(slices_crossed == length(unique(sliced_df_2$slice_position)))
+
+
+myHYS_E3_filtered_2 = myHYS_E3 %>%
+    dplyr::filter(ID %in% selection_mask2$ID)
+```"

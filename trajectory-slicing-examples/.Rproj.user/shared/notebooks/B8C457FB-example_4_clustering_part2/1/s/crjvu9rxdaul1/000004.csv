@@ -1,0 +1,13 @@
+"0","set.seed(42)"
+"0","myHYS_sample = myHYS_E4 %>%"
+"0","  dplyr::full_join(., clus_IDs)%>%"
+"0","  dplyr::filter(ID %in% sample(unique(myHYS_E4$ID), size = 300))%>%"
+"0","  dplyr::filter(!is.na(cluster))%>%"
+"0","  dplyr::mutate(cluster=as.character(cluster))"
+"1","[38;5;254mJoining with `by = join_by(ID)`[39m
+"
+"0","ggplot(myHYS_sample, aes(x=lon, y = lat, colour=cluster, group=ID))+"
+"0","  geom_polygon(data = world_with_borders, aes(x=long, y=lat, group=group), color='transparent', fill=""gray"", inherit.aes=FALSE)+"
+"0","  geom_path(data=radial_slice_df, aes(x=lon, y = lat, group=slice_position), inherit.aes=FALSE, alpha=0.6)+"
+"0","  geom_path()+"
+"0","  coord_cartesian(xlim = myHYS_E4$lon_i[1]+12.5*c(-1,1), ylim =myHYS_E4$lat_i[1]+12.5*c(-1,1))"

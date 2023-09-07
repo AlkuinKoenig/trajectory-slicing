@@ -1,0 +1,35 @@
+"0","```r
+tic()
+test_df_lat= data.table::rbindlist(lapply(c(45,50,55,60), 
+                                          function(x){get_slice_crossing_df(traj_df=myHYS, slice_position = x, slice_type=\"latitudinal\", 
+                                                                            ID_columns = c(\"ID_time\",\"ID_location\"),
+                                                                            extra_vars = c(\"height\",\"mixdepth\"), 
+                                                                            delta_filter = delta_filter_estimate$lat_delta[1])}))
+toc()
+```"
+"1","0.19 sec elapsed
+"
+"0","```r
+tic()
+test_df_lon= data.table::rbindlist(lapply(c(-30,-20,0,10), 
+                                          function(x){get_slice_crossing_df(traj_df=myHYS, slice_position = x, slice_type=\"longitudinal\",
+                                                                            ID_columns = c(\"ID_time\",\"ID_location\"), 
+                                                                            extra_vars = c(\"height\",\"mixdepth\"), 
+                                                                            delta_filter = delta_filter_estimate$lon_delta[1])}))
+toc()
+```"
+"1","0.2 sec elapsed
+"
+"0","```r
+tic()
+test_df_rad= data.table::rbindlist(lapply(c(5,10,15,20), 
+                                          function(x){get_slice_crossing_df(traj_df=myHYS, slice_position = x, slice_type=\"radial\", 
+                                                                            ID_columns = c(\"ID_time\",\"ID_location\"),
+                                                                            extra_vars = c(\"lat\",\"lon\",\"height\",\"mixdepth\"), 
+                                                                            delta_filter = delta_filter_estimate$radius_delta[1])}))%>%
+  #the following column allows us to plot the angle with 0 (-> north) in the middle. This is usally more intuitive
+  dplyr::mutate(angle_wmean_Nmid = ifelse(angle_wmean <=180, angle_wmean, angle_wmean-360))
+toc()
+```"
+"1","0.25 sec elapsed
+"

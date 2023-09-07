@@ -1,0 +1,10 @@
+"0","test_df_latlon.s = myHYS %>%"
+"0","  dplyr::mutate(lat_cut = cut(lat, seq(-90,90,1),include.lowest=TRUE),"
+"0","                lon_cut = cut(lon, seq(-360,360,1), include.lowest=TRUE))%>%"
+"0","  dplyr::group_by(lat_cut, lon_cut)%>%"
+"0","  dplyr::summarise(sum = sum(!is.na(height)))%>%"
+"0","  dplyr::mutate(get_interval_bounds(lat_cut, ""lat""),"
+"0","                get_interval_bounds(lon_cut, ""lon""))%>%"
+"0","  dplyr::mutate(sum_normalized = sum/max(.$sum))"
+"1","[38;5;254m`summarise()` has grouped output by 'lat_cut'. You can override using the `.groups` argument.[39m
+"

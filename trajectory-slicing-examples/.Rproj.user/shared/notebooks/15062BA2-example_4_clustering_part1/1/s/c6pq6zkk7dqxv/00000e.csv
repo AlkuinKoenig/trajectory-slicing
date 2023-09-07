@@ -1,0 +1,8 @@
+"0","xlims = myHYS_E4$lon_i[1]+15*c(-1,1)"
+"0","ylims = myHYS_E4$lat_i[1]+15*c(-1,1)"
+"0",""
+"0","p_footprint_latlon + "
+"0","  coord_cartesian(xlim = xlims, ylim = ylims)+"
+"0","  labs(title = ""kmeans based on latitude & longitude"",subtitle = paste0(""n = "", length_latlon_clus))"
+"1","[38;5;254mCoordinate system already present. Adding new coordinate system, which will replace the existing one.[39m
+"

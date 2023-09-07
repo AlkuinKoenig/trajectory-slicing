@@ -1,0 +1,15 @@
+"0","```r
+#The resulting map has self intersection problems so any further operation reports errors; using buffers of width 0 is a fast fix
+while(rgeos::gIsValid(world)==FALSE){
+  world <- rgeos::gBuffer(world, byid = TRUE, width = 0, quadsegs = 5, capStyle = \"ROUND\")
+}
+```"
+"1","Warning in RGEOSUnaryPredFunc(spgeom, byid, \"rgeos_isvalid\") :
+  Self-intersection at or near point -163.87651432973263 -84.34783231410475
+Warning in rgeos::gBuffer(world, byid = TRUE, width = 0, quadsegs = 5, capStyle = \"ROUND\") :
+  Spatial object is not projected; GEOS expects planar coordinates
+"
+"0","```r
+#Dissolving polygon's limits
+world <- raster::aggregate(world)
+```"

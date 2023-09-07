@@ -1,0 +1,3 @@
+"0","#Using the original maps package, then converting map into SpatialPolygons object"
+"0","world <- maps::map(""world"", fill=TRUE) %$%"
+"0","  maptools::map2SpatialPolygons(., IDs=names,proj4string=CRS(""+proj=longlat +datum=WGS84 +no_defs""))"

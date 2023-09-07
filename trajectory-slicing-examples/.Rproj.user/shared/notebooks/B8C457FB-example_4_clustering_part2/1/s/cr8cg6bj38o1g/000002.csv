@@ -1,0 +1,11 @@
+"0","sliced_df_CHC_last_clus = sliced_df_CHC_last %>%"
+"0","  dplyr::full_join(., clus_IDs)%>%"
+"0","  dplyr::filter(!(ID %in% IDs_multicross),"
+"0","                !is.na(cluster)) #filtering out trajectories that didn't cross all slices"
+"1","[38;5;254mJoining with `by = join_by(ID)`[39m
+"
+"0","ggplot(sliced_df_CHC_last_clus, aes(x=angle_wmean_Nmid, colour=as.character(cluster), y = hour_along_wmean))+"
+"0","  geom_point(alpha = 0.5)+"
+"0","  #coord_polar(direction = -1)+"
+"0","  scale_x_continuous(breaks = seq(-180,179,45), limits = c(-180,180))+"
+"0","  facet_wrap(~slice_position, labeller = labeller(slice_position = function(x){paste0(""radius = "",x)}))"

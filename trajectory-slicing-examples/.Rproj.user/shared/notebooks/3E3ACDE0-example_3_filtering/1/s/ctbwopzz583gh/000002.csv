@@ -1,0 +1,35 @@
+"0","```r
+
+angle_range = c(-160, -90)
+
+
+selection_mask= sliced_df_1%>%
+  dplyr::filter(angle_wmean_Nmid>=angle_range[1], angle_wmean_Nmid <= angle_range[2])%>%
+  dplyr::group_by(slice_position, ID)%>%
+  dplyr::summarise(crossed = any(crossing_type == \"decreasing\"),.groups = \"drop\")%>%
+  dplyr::group_by(ID)%>%
+  dplyr::summarise(slices_crossed = sum(crossed>0,na.rm=TRUE))%>%
+  dplyr::filter(slices_crossed == length(unique(sliced_df_1$slice_position)))#only take trajectories that crossed ALL the slices at the specified angles
+
+
+myHYS_E3_filtered = myHYS_E3 %>%
+    dplyr::filter(ID %in% selection_mask$ID)
+
+#create a new coordinate system to be plotted on the map
+radial_coords_system_df = create_radial_slice_df(slice_radius = unique(sliced_df_1$slice_position),
+                                         lon_center = unique(sliced_df_1$lon_i)%>%na.omit(),
+                                         lat_center = unique(sliced_df_1$lat_i)%>%na.omit())
+
+ggplot(myHYS_E3, aes(x=lon, y = lat, group=ID))+
+  geom_path(color = \"gray50\")+
+  geom_path(data = myHYS_E3_filtered, colour=\"gray10\")+
+  
+  geom_point(data = world, aes(x=long, y=lat, group=group), color='black', size=0.7, inherit.aes=FALSE)+
+  geom_path(data=radial_coords_system_df , aes(x=lon, y = lat, group = slice_position),inherit.aes=FALSE, col = \"blue\")+
+  geom_path(data=radial_coords_system_df %>% dplyr::filter(angle_180 >= angle_range[1], angle_180 <= angle_range[2]),
+            aes(x=lon, y = lat, group = slice_position),inherit.aes=FALSE, col = \"red\")+
+  annotate(geom=\"point\", x = myHYS_E3$lon_i[1], y = myHYS_E3$lat_i[1],colour=\"red\")+
+  coord_cartesian(ylim = c(-80,-10),xlim = c(-50,65))+ #note that I'm \"zooming in\"
+  labs(\"Filter: Cross red segments.\")
+
+```"

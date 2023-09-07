@@ -1,0 +1,18 @@
+"0","slice_positions = seq(0.5,14,2)"
+"0","tic()"
+"0","sliced_df_CHC= data.table::rbindlist(lapply(slice_positions, "
+"0","                                                function(x){get_slice_crossing_df(traj_df=myHYS_E4, slice_position = x,"
+"0","                                                                                  slice_type=""radial"","
+"0","                                                                                  ID_columns = ""ID"","
+"0","                                                                                  extra_vars = c(""lat"",""lon"",""height"",""mixdepth""), "
+"0","                                                                                  delta_filter = delta_filter_estimate$radius_delta[1])}))%>%"
+"0","  #the following column allows us to plot the angle with 0 (-> north) in the middle. This is usally more intuitive"
+"0","  dplyr::mutate(angle_wmean_Nmid = ifelse(angle_wmean <=180, angle_wmean, angle_wmean-360))"
+"0","toc()"
+"1","128.17 sec elapsed
+"
+"0","#dataframe for the ""radial legend"" in the plots"
+"0","radial_slice_df = create_radial_slice_df(slice_radius=slice_positions,lat_center = myHYS_E4$lat_i[1], lon_center = myHYS_E4$lon_i[1])"
+"2","Error in create_radial_slice_df(slice_radius = slice_positions, lat_center = myHYS_E4$lat_i[1],  : 
+  could not find function ""create_radial_slice_df""
+"

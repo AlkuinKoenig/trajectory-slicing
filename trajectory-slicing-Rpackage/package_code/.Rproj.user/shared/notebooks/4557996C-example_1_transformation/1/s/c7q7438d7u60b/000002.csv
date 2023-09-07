@@ -1,0 +1,23 @@
+"0","```r
+#longitudinal slices
+p1=ggplot(data=myHYS, aes(x=lon, y = lat, group = interaction(ID_time, ID_location),colour = interaction(ID_time, ID_location)))+
+  geom_path(size=0.2)+
+  geom_point(aes(x=unique(lon_i), y =unique(lat_i)), size=3, col=\"blue\")+
+  geom_vline(xintercept = unique(test_df_lon$slice_position), linetype=2)+
+  geom_path(data = world, aes(x=long, y=lat, group=group), color='black', size=0.7, inherit.aes=FALSE)+
+  geom_point(data=test_df_lon, aes(x=lon_wmean, y = lat_wmean, group = interaction(ID_time, ID_location)))+
+  coord_cartesian(xlim = c(-45,15), ylim = c(40,80))+
+  theme_bw()+theme(legend.position = \"none\")
+
+p2=ggplot(data=test_df_lon, aes(x=lat_wmean, y=height_wmean, shape = crossing_type, colour = interaction(ID_time)))+
+  geom_point()+
+  facet_wrap(~slice_position,ncol=1, labeller=labeller(slice_position = function(x){paste0(\"lon = \",x)}))+
+  theme_bw()+theme(legend.position = \"none\")+
+  labs(x= \"latitude of slice crossing\", y = \"altitude of slice crossing [magl]\")
+
+
+p1+p2+plot_layout(widths = c(1,0.5))
+```"
+"1","Warning: Removed 12 rows containing missing values (`geom_point()`).
+Warning: Removed 12 rows containing missing values (`geom_point()`).
+"

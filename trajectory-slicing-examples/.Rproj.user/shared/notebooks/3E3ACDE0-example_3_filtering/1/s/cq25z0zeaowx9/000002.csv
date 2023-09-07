@@ -1,0 +1,32 @@
+"0","```r
+selection_mask4= sliced_df_2%>%
+  dplyr::filter(angle_wmean_Nmid>=angle_range[1], angle_wmean_Nmid <= angle_range[2], 
+                case_when(slice_position <=5 ~ height_wmean <= mixdepth_wmean, #if slice radius <= 5, do filter A
+                          slice_position >=20 ~ height_wmean >= mixdepth_wmean, # if slice radius >= 20, do filter B
+                          1==1 ~ TRUE #don't do additional filtering if slice position >5 and < 20.
+                          )
+                )%>%
+  dplyr::group_by(slice_position, ID)%>%
+  dplyr::summarise(crossed = any(crossing_type == \"decreasing\"),.groups = \"drop\")%>% #this returns \"1\" if the slice was crossed in \"decreasin\" order at least once. 
+  dplyr::group_by(ID)%>%
+  dplyr::summarise(slices_crossed = sum(crossed>0,na.rm=TRUE))%>%
+  dplyr::filter(slices_crossed == length(unique(sliced_df_2$slice_position)))
+
+
+myHYS_E3_filtered_4 = myHYS_E3 %>%
+    dplyr::filter(ID %in% selection_mask4$ID)
+
+
+ggplot(myHYS_E3, aes(x=lon, y = lat, group=ID))+
+  geom_path(color = \"gray50\")+
+  geom_path(data = myHYS_E3_filtered_4, aes(colour=height))+
+  
+  geom_point(data = world, aes(x=long, y=lat, group=group), color='black', size=0.7, inherit.aes=FALSE)+
+  geom_path(data=radial_coords_system_df , aes(x=lon, y = lat, group = slice_position),inherit.aes=FALSE, col = \"blue\")+
+  geom_path(data=radial_coords_system_df %>% dplyr::filter(angle_180 >= angle_range[1], angle_180 <= angle_range[2]),
+            aes(x=lon, y = lat, group = slice_position),inherit.aes=FALSE, col = \"red\")+
+  annotate(geom=\"point\", x = myHYS_E3$lon_i[1], y = myHYS_E3$lat_i[1],colour=\"red\")+
+  scale_colour_viridis_c(limits = c(0,6000),oob= scales::squish)+
+  coord_cartesian(ylim = c(-80,-10),xlim = c(-50,65))+ #note that I'm \"zooming in\"
+  labs(subtitle=\"Filter: Cross red segments.\nIn the short range, cross below mixing height. In the long range, cross above mixing height\")
+```"

@@ -1,0 +1,11 @@
+"0","```r
+library(tidyr)#for crunching
+library(magrittr)
+library(dplyr)#for crunching
+library(data.table)#for crunching (specifically rbindlist, which is fast). 
+library(circular)#for circular variables (the angle) and circular means
+library(tictoc)#for time keeping
+library(ggplot2)#for plotting
+library(rgdal)#for maps
+library(scales)#for plotting
+```"

@@ -1,0 +1,39 @@
+"0","library(tidyr)#for crunching"
+"2","Warning messages:
+"
+"2","1: package ‘here’ was built under R version 3.6.3 
+"
+"2","2: package ‘tidyr’ was built under R version 3.6.3 
+"
+"2","3: package ‘data.table’ was built under R version 3.6.3 
+"
+"2","4: package ‘circular’ was built under R version 3.6.3 
+"
+"2","5: package ‘sp’ was built under R version 3.6.3 
+"
+"2","6: package ‘rgdal’ was built under R version 3.6.3 
+"
+"2","7: package ‘maps’ was built under R version 3.6.3 
+"
+"2","8: package ‘patchwork’ was built under R version 3.6.3 
+"
+"2","9: package ‘factoextra’ was built under R version 3.6.3 
+"
+"0","library(magrittr)"
+"0","library(dplyr)#for crunching"
+"0","library(data.table)#for crunching (specifically rbindlist, which is fast). "
+"0","library(circular)#for circular variables (the angle) and circular means"
+"0","library(tictoc)#for time keeping"
+"0","library(ggplot2)#for plotting"
+"0","library(rgdal)#for maps"
+"0","library(scales)#for plotting"
+"0","library(maps)#for the map"
+"0",""
+"0","library(trajectory.slicing)"
+"0",""
+"0","#In case you have problems with getting a compiled trajectory.slicing library and with getting it compiled yourself, you can also directly source the needed custom functions by uncommenting what is below. "
+"0","#source(paste0(here::here(),""/../trajectory-slicing-Rpackage/package_code/R/fun_get_polar_coords_geographical.R""))"
+"0","#source(paste0(here::here(),""/../trajectory-slicing-Rpackage/package_code/R/fun_get_slice_crossing_df.R""))"
+"0","#source(paste0(here::here(),""/../trajectory-slicing-Rpackage/package_code/R/fun_create_radial_guide_df.R""))"
+"0","#some world maps"
+"0",""

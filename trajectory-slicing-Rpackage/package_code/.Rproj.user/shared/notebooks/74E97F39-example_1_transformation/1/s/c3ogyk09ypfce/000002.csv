@@ -1,0 +1,81 @@
+"0","library(tidyr)#for crunching"
+"0","library(dplyr)#for crunching. Especially the ""case_when"" function"
+"2","
+Attaching package: ‘dplyr’
+
+"
+"2","The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+"
+"2","The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+"
+"0","library(data.table)#for crunching (specifically rbindlist, which is fast). "
+"2","Registered S3 method overwritten by 'data.table':
+  method           from
+  print.data.table     
+"
+"2","data.table 1.13.0 using 8 threads (see ?getDTthreads).  Latest news: r-datatable.com
+"
+"2","
+Attaching package: ‘data.table’
+
+"
+"2","The following objects are masked from ‘package:dplyr’:
+
+    between, first, last
+
+"
+"0","library(circular)#for circular variables (the angle) and circular means"
+"2","Package 'circular', 0.4-93 (2017-06-26). Type 'help(Circular)' for summary information. 
+ Please report any bug or comments to Claudio Agostinelli <claudio.agostinelli@unitn.it>
+"
+"2","
+Attaching package: ‘circular’
+
+"
+"2","The following objects are masked from ‘package:stats’:
+
+    sd, var
+
+"
+"0","library(tictoc)#for time keeping"
+"0","library(rgdal)#for maps"
+"2","Loading required package: sp
+"
+"2","rgdal: version: 1.5-16, (SVN revision 1050)
+Geospatial Data Abstraction Library extensions to R successfully loaded
+Loaded GDAL runtime: GDAL 3.0.4, released 2020/01/28
+Path to GDAL shared files: C:/Users/koenigal/Documents/R/win-library/3.6/rgdal/gdal
+GDAL binary built with GEOS: TRUE 
+Loaded PROJ runtime: Rel. 6.3.1, February 10th, 2020, [PJ_VERSION: 631]
+Path to PROJ shared files: C:/Users/koenigal/Documents/R/win-library/3.6/rgdal/proj
+Linking to sp version:1.4-2
+To mute warnings of possible GDAL/OSR exportToProj4() degradation,
+use options(""rgdal_show_exportToProj4_warnings""=""none"") before loading rgdal.
+"
+"0","library(maps)#for maps"
+"0","library(scales)#for plotting"
+"0","library(magrittr)#for the maps"
+"2","
+Attaching package: ‘magrittr’
+
+"
+"2","The following object is masked from ‘package:tidyr’:
+
+    extract
+
+"
+"0","library(ggplot2)#for plotting"
+"0","library(patchwork)#for combining plots"
+"0","library(trajectory.slicing)"
+"0","# "
+"0","# #load the needed functions (custom scripts). Check their scripts for more details and information about use. "
+"0","# source(paste0(here::here(),""/R/fun_get_polar_coords_geographical.R""))"
+"0","# source(paste0(here::here(),""/R/fun_get_slice_crossing_df.R""))"
+"0","# source(paste0(here::here(),""/R/fun_create_radial_guide_df.R""))"
+"0",""

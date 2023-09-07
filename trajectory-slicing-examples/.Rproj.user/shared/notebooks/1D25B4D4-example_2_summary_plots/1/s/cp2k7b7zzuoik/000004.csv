@@ -1,0 +1,31 @@
+"0","mixdepth_df = sliced_df %>%"
+"0","  dplyr::mutate(angle_cut = cut(angle_wmean_Nmid, seq(-360,360,6),include.lowest=TRUE))%>%"
+"0","  dplyr::group_by(angle_cut, slice_position)%>%"
+"0","  dplyr::summarise(mixdepth_wmean = mean(mixdepth_wmean,na.rm=TRUE), .groups = ""drop"")%>%"
+"0","  dplyr::mutate(get_interval_bounds(angle_cut, ""angle""))"
+"0",""
+"0",""
+"0","p_rad2=ggplot(data=sliced_df.s, aes(xmin = angle_inf, xmax = angle_sup, ymin = height_inf, ymax = height_sup, fill = crossings_decreasing_norm1))+"
+"0","   facet_wrap(~slice_position,ncol=1, "
+"0","             labeller = labeller(slice_position = function(x){paste0(""radius = "",x,""°"")}), #pimping the strip label a bit"
+"0","             strip.position = ""right"")+"
+"0","  geom_rect()+"
+"0","  geom_segment(data=mixdepth_df, aes(x=angle_inf, xend =angle_sup, y = mixdepth_wmean, yend = mixdepth_wmean, colour =""mean BL\nheight [magl]""),"
+"0","               inherit.aes=FALSE,size=1)+"
+"0","  scale_fill_viridis_c(na.value=""transparent"", trans=""log10"")+"
+"0","  scale_x_continuous(breaks = seq(-180,180,45))+"
+"0","  theme_bw()+"
+"0","  labs(x=""angle from north [°]"", y = ""altitude [magl]"", fill = ""inward\ncrossings\n[normalized]"", colour="""")"
+"2","Warning:"
+"2"," [38;5;254mUsing `size` aesthetic for lines was deprecated in ggplot2 3.4.0.
+[36mi[38;5;254m Please use `linewidth` instead.
+[90mThis warning is displayed once every 8 hours.[38;5;254m
+[90mCall `lifecycle::last_lifecycle_warnings()` to see where this warning was generated.[38;5;254m[39m
+"
+"0","p_rad2"
+"2","Warning:"
+"2"," [38;5;254mRemoved 119 rows containing missing values (`geom_rect()`).[39m
+"
+"2","Warning:"
+"2"," [38;5;254mRemoved 3 rows containing missing values (`geom_segment()`).[39m
+"

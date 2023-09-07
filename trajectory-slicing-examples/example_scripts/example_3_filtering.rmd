@@ -1,0 +1,310 @@
+---
+title: "Trajectory slicing: Example 3 - filtering with cylindrical slices"
+output:
+  html_document:
+    code_folding: hide
+    df_print: paged
+---
+
+The slicing approach can be very useful if air masses are to be filtered by certain criteria. A few examples are shown here.
+
+##used libraries
+```{r, warning=FALSE, message=FALSE}
+library(tidyr)#for crunching
+library(magrittr)
+library(dplyr)#for crunching
+library(data.table)#for crunching (specifically rbindlist, which is fast). 
+library(circular)#for circular variables (the angle) and circular means
+library(tictoc)#for time keeping
+library(ggplot2)#for plotting
+library(rgdal)#for maps
+library(scales)#for plotting
+library(maps)#for the map
+library(patchwork)#excellent library for multipanel plots
+library(trajectory.slicing)
+
+#In case you have problems with getting a compiled trajectory.slicing library and with getting it compiled yourself, you can also directly source the needed custom functions by uncommenting what is below. 
+#source(paste0(here::here(),"/../trajectory-slicing-Rpackage/package_code/R/fun_get_polar_coords_geographical.R"))
+#source(paste0(here::here(),"/../trajectory-slicing-Rpackage/package_code/R/fun_get_slice_crossing_df.R"))
+#source(paste0(here::here(),"/../trajectory-slicing-Rpackage/package_code/R/fun_create_radial_guide_df.R"))
+```
+
+##data import and prepping
+```{r, warning = FALSE, message = FALSE}
+set.seed(1000)
+#myHYS_E3 = readRDS("D:/slices.of.HYSPLIT_V2/slices.of.HYSPLIT/data/DARWIN_back_20d_run1/df/run_combined.rds")%>%
+  
+#myHYS_E3=readRDS("D:/slices.of.HYSPLIT_V2/slices.of.HYSPLIT/data/Maido_back_4d/run_combined.rds")%>%
+#myHYS_E3=readRDS("D:/slices.of.HYSPLIT_V2/slices.of.HYSPLIT/data/Mace_Head_back4d/run_combined.rds")%>%
+myHYS_E3=readRDS(paste0(here::here(),"/example_data/V1_Cape_Point_5d/df/run_combined.rds"))%>%
+
+  dplyr::mutate(get_polar_coords_geographical(lat,lon,lat_i,lon_i),.after=lon)%>%
+  #as I'm emitting trajectories from one single point of emission, the time of emission is unique to each trajectory. I'm using it as ID here.
+  dplyr::mutate(ID = traj_dt_i)%>%
+  dplyr::filter(ID %in% sample(unique(.$ID), size = 2500, replace=FALSE))
+
+
+#estimating how much difference in latitude, longitude, and radius can be expected in one time step. 
+#This is used to defined the "delta_filter" later. The goal is to save computational time. 
+delta_filter_estimate = myHYS_E3 %>%
+  dplyr::group_by(ID)%>%  
+  dplyr::arrange(hour_along)%>%
+  dplyr::summarise(across(.cols = c("radius","lat","lon"), .fns = function(x){abs(x-lag(x,1))}, .names = "{.col}_delta"))%>%
+  dplyr::ungroup()%>%
+  dplyr::summarise_at(vars(contains("delta")), function(x){quantile(x, 0.99,na.rm=TRUE)})
+
+#delta_filter_estimate
+```
+
+##using only three slices gives already pretty good filtering, but this can also be increased by taking more slices. 5 in total for example
+```{r}
+tic()
+sliced_df_1= data.table::rbindlist(lapply(c(5,10,20), 
+                                                function(x){get_slice_crossing_df(traj_df=myHYS_E3, slice_position = x, slice_type="radial",
+                                                                                  ID_columns = "ID",
+                                                                                  extra_vars = c("lat","lon","height","mixdepth"), 
+                                                                                  delta_filter = delta_filter_estimate$radius_delta[1])}))%>%
+  #the following column allows us to plot the angle with 0 (-> north) in the middle. This is usally more intuitive
+  dplyr::mutate(angle_wmean_Nmid = ifelse(angle_wmean <=180, angle_wmean, angle_wmean-360))
+toc()
+```
+
+
+##we'll prepare a world map for our plots
+```{r, fig.width = 6, fig.height = 4}
+#Using the original maps package, then converting map into SpatialPolygons object
+world <- maps::map("world", fill=TRUE) %$%
+  maptools::map2SpatialPolygons(., IDs=names,proj4string=CRS("+proj=longlat +datum=WGS84 +no_defs"))
+#The resulting map has self intersection problems so any further operation reports errors; using buffers of width 0 is a fast fix
+while(rgeos::gIsValid(world)==FALSE){
+  world <- rgeos::gBuffer(world, byid = TRUE, width = 0, quadsegs = 5, capStyle = "ROUND")
+}
+#Dissolving polygon's limits
+world <- raster::aggregate(world)
+```
+
+
+
+We will do all filtering similarly. First, we will use the sliced data frame to create a mask to find which trajectories (defined by their unique ID) fullfill a series of conditions. We then select from the initial trajectory data frame all trajectories with the right ID.
+
+#let's start by selecting all trajectories that crossed our slices at an angle (with respect to north) of between -160 and -90 degrees.
+```{r, fig.width = 7.5, fig.height=4.5}
+angle_range = c(-160, -90)
+
+
+selection_mask= sliced_df_1%>%
+  dplyr::filter(angle_wmean_Nmid>=angle_range[1], angle_wmean_Nmid <= angle_range[2])%>%
+  dplyr::group_by(slice_position, ID)%>%
+  dplyr::summarise(crossed = any(crossing_type == "decreasing"),.groups = "drop")%>%
+  dplyr::group_by(ID)%>%
+  dplyr::summarise(slices_crossed = sum(crossed>0,na.rm=TRUE))%>%
+  dplyr::filter(slices_crossed == length(unique(sliced_df_1$slice_position)))#only take trajectories that crossed ALL the slices at the specified angles
+
+
+myHYS_E3_filtered = myHYS_E3 %>%
+    dplyr::filter(ID %in% selection_mask$ID)
+
+#create a new coordinate system to be plotted on the map
+radial_coords_system_df = create_radial_guide_df(slice_radius = unique(sliced_df_1$slice_position),
+                                         lon_center = unique(sliced_df_1$lon_i)%>%na.omit(),
+                                         lat_center = unique(sliced_df_1$lat_i)%>%na.omit())
+
+#and plotting
+ggplot(myHYS_E3, aes(x=lon, y = lat, group=ID))+
+  geom_path(color = "gray50")+
+  geom_path(data = myHYS_E3_filtered, aes(colour=height))+
+  
+  geom_path(data = world, aes(x=long, y=lat, group=group), color='black', size=0.7, inherit.aes=FALSE)+
+  geom_path(data=radial_coords_system_df , aes(x=lon, y = lat, group = slice_position),inherit.aes=FALSE, col = "blue")+
+  geom_path(data=radial_coords_system_df %>% dplyr::filter(angle_180 >= angle_range[1], angle_180 <= angle_range[2]),
+            aes(x=lon, y = lat, group = slice_position),inherit.aes=FALSE, col = "red",size=1)+
+  annotate(geom="point", x = myHYS_E3$lon_i[1], y = myHYS_E3$lat_i[1],colour="red")+
+  scale_colour_viridis_c(limits = c(0,6000),oob= scales::squish)+
+  coord_cartesian(ylim = c(-80,-10),xlim = c(-50,65))+ #note that I'm "zooming in"
+  labs(subtitle = "Filter: Cross red segments. Unfiltered trajectories shown in grey")
+
+```
+
+##using only three slices gives already pretty good filtering, but this can also be increased by taking more slices. We can redo our calculations for 5 slices, for example.
+```{r}
+tic()
+sliced_df_2= data.table::rbindlist(lapply(c(2.5,5,10,15,20), 
+                                                function(x){get_slice_crossing_df(traj_df=myHYS_E3, slice_position = x, slice_type="radial",
+                                                                                  ID_columns = "ID",
+                                                                                  extra_vars = c("lat","lon","height","mixdepth"), 
+                                                                                  delta_filter = delta_filter_estimate$radius_delta[1])}))%>%
+  #the following column allows us to plot the angle with 0 (-> north) in the middle. This is usally more intuitive
+  dplyr::mutate(angle_wmean_Nmid = ifelse(angle_wmean <=180, angle_wmean, angle_wmean-360))
+toc()
+```
+
+We get a new mask and plot. 
+```{r, fig.width = 7.5, fig.height=4.5}
+selection_mask2= sliced_df_2%>%
+  dplyr::filter(angle_wmean_Nmid>=angle_range[1], angle_wmean_Nmid <= angle_range[2])%>%
+  dplyr::group_by(slice_position, ID)%>%
+  dplyr::summarise(crossed = any(crossing_type == "decreasing"),.groups = "drop")%>%
+  dplyr::group_by(ID)%>%
+  dplyr::summarise(slices_crossed = sum(crossed>0,na.rm=TRUE))%>%
+  dplyr::filter(slices_crossed == length(unique(sliced_df_2$slice_position)))
+
+
+myHYS_E3_filtered_2 = myHYS_E3 %>%
+    dplyr::filter(ID %in% selection_mask2$ID)
+
+#create a new coordinate system to be plotted on the map
+radial_coords_system_df = create_radial_guide_df(slice_radius = unique(sliced_df_2$slice_position),
+                                         lon_center = unique(sliced_df_2$lon_i)%>%na.omit(),
+                                         lat_center = unique(sliced_df_2$lat_i)%>%na.omit())
+
+
+
+ggplot(myHYS_E3, aes(x=lon, y = lat, group=ID))+
+  geom_path(color = "gray50")+
+  geom_path(data = myHYS_E3_filtered_2, aes(colour=height))+
+  
+  geom_path(data = world, aes(x=long, y=lat, group=group), color='black', size=0.7, inherit.aes=FALSE)+
+  geom_path(data=radial_coords_system_df , aes(x=lon, y = lat, group = slice_position),inherit.aes=FALSE, col = "blue")+
+  geom_path(data=radial_coords_system_df %>% dplyr::filter(angle_180 >= angle_range[1], angle_180 <= angle_range[2]),
+            aes(x=lon, y = lat, group = slice_position),inherit.aes=FALSE, col = "red", size=1)+
+  annotate(geom="point", x = myHYS_E3$lon_i[1], y = myHYS_E3$lat_i[1],colour="red")+
+  scale_colour_viridis_c(limits = c(0,6000),oob= scales::squish)+
+  coord_cartesian(ylim = c(-80,-10),xlim = c(-50,65))+ #note that I'm "zooming in"
+  labs(subtitle = "Filter: Cross red segments at any height.")
+```
+
+One could also add additional filtering criteria. For example, that the crossing of the slice must have happened above the mixing height. 
+```{r, fig.width = 7.5, fig.height=4.5}
+selection_mask3= sliced_df_2%>%
+  dplyr::filter(angle_wmean_Nmid>=angle_range[1], angle_wmean_Nmid <= angle_range[2], 
+                height_wmean >= mixdepth_wmean#!!! only this part changed
+                )%>%
+  dplyr::group_by(slice_position, ID)%>%
+  dplyr::summarise(crossed = any(crossing_type == "decreasing"),.groups = "drop")%>%
+  dplyr::group_by(ID)%>%
+  dplyr::summarise(slices_crossed = sum(crossed>0,na.rm=TRUE))%>%
+  dplyr::filter(slices_crossed == length(unique(sliced_df_2$slice_position)))
+
+
+myHYS_E3_filtered_3 = myHYS_E3 %>%
+    dplyr::filter(ID %in% selection_mask3$ID)
+
+
+ggplot(myHYS_E3, aes(x=lon, y = lat, group=ID))+
+  geom_path(color = "gray50")+
+  geom_path(data = myHYS_E3_filtered_3, aes(colour = height))+
+  
+  geom_path(data = world, aes(x=long, y=lat, group=group), color='black', size=0.7, inherit.aes=FALSE)+
+  geom_path(data=radial_coords_system_df , aes(x=lon, y = lat, group = slice_position),inherit.aes=FALSE, col = "blue")+
+  geom_path(data=radial_coords_system_df %>% dplyr::filter(angle_180 >= angle_range[1], angle_180 <= angle_range[2]),
+            aes(x=lon, y = lat, group = slice_position),inherit.aes=FALSE, col = "red", size=1)+
+  annotate(geom="point", x = myHYS_E3$lon_i[1], y = myHYS_E3$lat_i[1],colour="red")+
+  scale_colour_viridis_c(limits = c(0,6000), oob= scales::squish)+
+  coord_cartesian(ylim = c(-80,-10),xlim = c(-50,65))+ #note that I'm "zooming in"
+  labs(subtitle="Filter: Cross red segments above mixing height.")
+```
+
+As can be seen, only a few trajectories fulfilled the criteria of crossing ALL the slices at altitudes above the mixing height!
+
+Until now we filtered for each slice by the same criteria (angle & mixing depth), but there is no need to do so! It is of course possible to impose a different selection criterion for different slices. For example, we can look for trajectories (within the angular range) that passed below the mixing height when close to the centerpoint, and above the mixing height when far from the centerpoint (we don't impose rules on the mid-range here)
+```{r, fig.width = 7.5, fig.height=4.5}
+selection_mask4= sliced_df_2%>%
+  dplyr::filter(angle_wmean_Nmid>=angle_range[1], angle_wmean_Nmid <= angle_range[2], 
+                case_when(slice_position <=5 ~ height_wmean <= mixdepth_wmean, #if radius <= 5, do filter A
+                          slice_position >=20 ~ height_wmean >= mixdepth_wmean, # if radius >= 20, do filter B
+                          1==1 ~ TRUE #don't do additional filtering if slice position >5 and < 20.
+                          )
+                )%>%
+  dplyr::group_by(slice_position, ID)%>%
+  dplyr::summarise(crossed = any(crossing_type == "decreasing"),.groups = "drop")%>% #this returns "1" if the slice was crossed in "decreasing" order at least once. 
+  dplyr::group_by(ID)%>%
+  dplyr::summarise(slices_crossed = sum(crossed>0,na.rm=TRUE))%>%
+  dplyr::filter(slices_crossed == length(unique(sliced_df_2$slice_position)))
+
+
+myHYS_E3_filtered_4 = myHYS_E3 %>%
+    dplyr::filter(ID %in% selection_mask4$ID)
+
+
+ggplot(myHYS_E3, aes(x=lon, y = lat, group=ID))+
+  geom_path(color = "gray50")+
+  geom_path(data = myHYS_E3_filtered_4, aes(colour=height))+
+  
+  geom_path(data = world, aes(x=long, y=lat, group=group), color='black', size=0.7, inherit.aes=FALSE)+
+  geom_path(data=radial_coords_system_df , aes(x=lon, y = lat, group = slice_position),inherit.aes=FALSE, col = "blue")+
+  geom_path(data=radial_coords_system_df %>% dplyr::filter(angle_180 >= angle_range[1], angle_180 <= angle_range[2]),
+            aes(x=lon, y = lat, group = slice_position),inherit.aes=FALSE, col = "red", size=1)+
+  annotate(geom="point", x = myHYS_E3$lon_i[1], y = myHYS_E3$lat_i[1],colour="red")+
+  scale_colour_viridis_c(limits = c(0,6000),oob= scales::squish)+
+  coord_cartesian(ylim = c(-80,-10),xlim = c(-50,65))+ #note that I'm "zooming in"
+  labs(subtitle="Filter: Cross red segments.\nIn the short range, cross below mixing height. In the long range, cross above mixing height")
+```
+
+Or maybe we can check trajectories that came from the south-west in the long range, but the south-east in the short range?
+```{r, fig.width = 7.5, fig.height=4.5}
+angle_range_west =  c(-160, -90) #that's how we defined the south-westerly origin in the long range
+angle_range_east = c(90, 140) # that#s how we define the south-easterly origin in the short range
+
+selection_mask5= sliced_df_2%>%
+  dplyr::filter(case_when(
+    #if slice radius <= 5, do filter A
+    slice_position <=5 ~ angle_wmean_Nmid >= angle_range_east[1] & angle_wmean_Nmid <= angle_range_east[2], 
+    # if slice radius >= 10, do filter B
+    slice_position >=10 ~ angle_wmean_Nmid >= angle_range_west[1] & angle_wmean_Nmid <= angle_range_west[2], 
+    1==1 ~ TRUE #don't do additional filtering if another slice position
+  )
+  )%>%
+  dplyr::group_by(slice_position, ID)%>%
+  dplyr::summarise(crossed = any(crossing_type == "decreasing"),.groups = "drop")%>% #this returns "1" if the slice was crossed in "decreasin" order at least once. 
+  dplyr::group_by(ID)%>%
+  dplyr::summarise(slices_crossed = sum(crossed>0,na.rm=TRUE))%>%
+  dplyr::filter(slices_crossed == length(unique(sliced_df_2$slice_position)))
+
+
+myHYS_E3_filtered_5 = myHYS_E3 %>%
+    dplyr::filter(ID %in% selection_mask5$ID)
+
+
+ggplot(myHYS_E3, aes(x=lon, y = lat, group=ID))+
+  geom_path(color = "gray50")+
+  geom_path(data = myHYS_E3_filtered_5, aes(colour=height))+
+  
+  geom_path(data = world, aes(x=long, y=lat, group=group), color='black', size=0.7, inherit.aes=FALSE)+
+  geom_path(data=radial_coords_system_df , aes(x=lon, y = lat, group = slice_position),inherit.aes=FALSE, col = "blue")+
+  #the south-westerly filter segments
+  geom_path(data=radial_coords_system_df %>% dplyr::filter(angle_180 >= angle_range_west[1], angle_180 <= angle_range_west[2],
+                                                           slice_position >=10),
+            aes(x=lon, y = lat, group = slice_position),inherit.aes=FALSE, col = "red", size=1)+
+  #the south-easterly filter segments
+  geom_path(data=radial_coords_system_df %>% dplyr::filter(angle_180 >= angle_range_east[1], angle_180 <= angle_range_east[2],
+                                                           slice_position <=5),
+            aes(x=lon, y = lat, group = slice_position),inherit.aes=FALSE, col = "green", size=1)+
+  annotate(geom="point", x = myHYS_E3$lon_i[1], y = myHYS_E3$lat_i[1],colour="red")+
+  
+  scale_colour_viridis_c(limits = c(0,6000),oob= scales::squish)+
+  coord_cartesian(ylim = c(-80,-10),xlim = c(-50,65))+ #note that I'm "zooming in"
+  labs(subtitle="Filter: Cross green segments in the short range, cross red segments in the mid-to-long range")
+```
+
+Such filtering can of course also be used to compute a time series for a certain air mass origin. For example, let's see the seasonality of the fraction of emitted trajectories that crossed the 5 slices as defined above (from the southwest for the long-range, from the southeast for the short range).
+```{r, fig.height = 3, fig.width = 7}
+myHYS_E3_filtered_5.ts = myHYS_E3 %>%
+  #we don't want to use a filter here, because, for normalization, we want to retain trajectories that didn't fulfill the conditions
+  #instead, we just flag trajectories accordingly
+  dplyr::mutate(condition_TRUE = ifelse(ID %in% selection_mask5$ID, TRUE, FALSE))%>%
+  dplyr::mutate(month = month(ID))%>%
+  dplyr::group_by(month)%>%
+  dplyr::summarise(condition_TRUE_frac = sum(condition_TRUE)/(sum(condition_TRUE) + sum(!condition_TRUE))) #get the fraction of all trajectories that fulfilled the condition.
+
+
+ggplot(myHYS_E3_filtered_5.ts, aes(x=month, y = condition_TRUE_frac))+
+  geom_line()+
+  geom_point()+
+  scale_x_continuous(breaks = 1:12)+
+  theme_bw()+
+  labs(y = "fraction of trajectories", x = "month of the year", 
+       subtitle = "seasonality of the fraction of trajectories with the air mass origin as defined above")
+```
+
+There appears to be a seasonality! Basically no trajectories had this air mass origin for May - July, while more than ~ 10% had this origin in December. 
+
